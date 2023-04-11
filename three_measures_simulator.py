@@ -14,6 +14,7 @@ import os
 import random
 import numpy as np
 import pandas as pd
+import scipy.stats as sstats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
@@ -355,11 +356,73 @@ def generate_abundance(m, card_a, card_b, value_min_abundances_df,
     return df_abundance
 
 
-def generate_fraccontri(df_abundance, metada_df):
-    df_abundance
+def logistic(t, T, k, y0):
+    # source: http://en.wikipedia.org/wiki/Logistic_function
+    return (k * y0 * np.exp(t * T)) / (k + y0 * np.exp(t * T) - y0)
 
 
+def t50(T, k, y0):
+    """"as we are dealing with proportions, total being 100%, half carbons is simply 50%"""
+    return (1 / T) * np.log((k - y0) / y0)
 
+def scale_to_interval(array, targ_max, targ_min):
+    mi = array.min()
+    ma = array.max()
+    i01 = ( array - mi ) / (ma - mi )
+    outarr = (i01 * (targ_max - targ_min) ) + targ_min
+    return outarr
+
+
+def generate_fraccontri(df_abundance, metada_df, card_a, card_b):
+    thevariables = df_abundance.columns
+    thesamples = metada_df['sample'].tolist()
+
+    cards_samples = {'a': card_a, 'b': card_b}
+    timepoints = sorted(metada_df['timenum'].unique())
+
+    dico_varis = {}
+    for i in range(len(thevariables)):
+        dico_varis[i] = dict()
+        tky = { 'a': [[2, 5], [1,2], [0.25, 0.5]],
+                'b': [[0, 1], [8,10], [0.15, 0.8]]}
+        for group in ['a', 'b']:
+            theTs = np.linspace(tky[group][0][0], tky[group][0][1], len(timepoints))
+            theks = np.linspace(tky[group][1][0], tky[group][1][1], len(timepoints))
+            they0s = np.linspace(tky[group][2][0], tky[group][2][1], len(timepoints))
+
+            Y = list()
+            for t in timepoints:
+                Y.append(
+                    logistic(t,
+                             theTs[t],
+                             theks[t],
+                             they0s[t])
+                )
+
+            Ydemopoints = scale_to_interval(np.array(Y), 0.8, 0.01)
+            plt.scatter([i for i in range(len(Ydemopoints))], Ydemopoints)
+            plt.title("Datapoints")
+            plt.ylabel("%13C")
+            plt.xlabel("t")
+            plt.savefig(str(i)+group+"-mxmxmx.pdf")
+            plt.close()
+            dico_varis[i][group] = Ydemopoints
+
+    # build replicates :
+    odi = dico_varis.copy()
+    for var in dico_varis.keys():
+        for group in dico_varis[var].keys():
+            for t in range(dico_varis[var][group].size):
+                print(dico_varis[var][group][t])
+                ahhh = np.linspace(dico_varis[var][group][t],
+                                                 dico_varis[var][group][t] + 0.2,
+                                                 cards_samples[group])
+                print(ahhh)
+                odi[var][group][t] = ahhh
+
+    print(odi)
+    import sys
+    sys.exit()
 
     return df
 
@@ -437,10 +500,9 @@ if __name__ == "__main__":
                               'sample': individs,
                               'condition': [i[0] for i in individs],
                               'timepoint': [i[2] for i in individs],
-                              'timenum': [i[2] for i in individs],
+                              'timenum': [int(i[2]) for i in individs],
                               'short_comp': ['en' for i in individs]
                               })
-    print(metada_df)
     file_metada = name_file_out.split("/")[-1].\
         replace(".tsv", ".csv").replace("data_", "meta_")
     metada_df.to_csv(file_metada, index=False)
@@ -448,12 +510,10 @@ if __name__ == "__main__":
     print("\n  Done Abundance")
 
     print('\nGenerating synthetic fractional contributions')
-
     df_fraccontri = generate_fraccontri(df_abundance,
-                                        metada_df)
-
+                                        metada_df, card_a, card_b)
     # for visualization only: isotopologues
-    df_isotopol = generate_uptolabel10_equal_isotopologues(m, card_a, card_b,
+    df_isotopol = generate_uptolabel10_equal_isotopologues(m,
                                                   metada_df)
 
 
