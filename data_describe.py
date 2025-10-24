@@ -120,7 +120,6 @@ def do_descriptor_df(df, groups):
     return df_out_pkg, len_grA, len_grB
 
 
-
 def give_reduced_df( df, ddof ):
     rownames = df.index
     df.index = range(len(rownames))  # index must be numeric because compute reduction accepted
@@ -156,14 +155,15 @@ if __name__ == "__main__":
     tabl = args.in_file
         #"../simulated_data/data_dsta-l_m50-overlap45-a11-b12_67.0-1335.0.tsv"
     #tabl =  "../simulated_data/data_unif_m1000-overlap300-a33-b32_0-1.tsv"
-    dir_out = args.dir_out + tabl.split("/")[-1].replace(".tsv", "").replace("data_", "") + "/"
+    dir_out = args.out_dir + tabl.split("/")[-1].replace(".tsv", "").replace("data_", "") + "/"
     if not os.path.exists(dir_out):
         os.makedirs(dir_out)
 
     redo_plot_orig_data = args.redo_plot_orig_data
 
     df = pd.read_csv(tabl,  sep='\t', index_col=0)
-    dfredu_transposed = give_reduced_df(df.T, 0)
+    dfredu_transposed = give_reduced_df(df, 0)
+    print(dfredu_transposed.head())
     dfredu = dfredu_transposed.T
     df = dfredu.copy() # ok, reduced
     df["indiv"] = df.index
@@ -186,9 +186,9 @@ if __name__ == "__main__":
 
 
     if redo_plot_orig_data:
-        if m > 60:
+        if m > 20:
             print("Won t print plot, too many variables: m= (m)")
-        else : # no more than 60 variables for this kind of plot
+        else : # no more than x variables for this kind of plot
             print("\nPrinting plot of simulated variables...")
             df_out_pkg['var'] = df_out_pkg.index
             df_sele_cols = df_out_pkg[['var', 'distance']]
@@ -337,6 +337,6 @@ if __name__ == "__main__":
     print("cases where distance is negative but padj is signif : ")
     whois_lodiff_lods_psignif  = df_out_pkg.loc[df_out_pkg['pvalue_pkg'] <= 0.05, :]
     whois_lodiff_lods_psignif = whois_lodiff_lods_psignif.loc[
-        whois_lodiff_lods_psignif['d_over_s'] <= -0.9, : ]
+        whois_lodiff_lods_psignif['d_over_s'] <= -0.01, : ]
     print(whois_lodiff_lods_psignif)
 

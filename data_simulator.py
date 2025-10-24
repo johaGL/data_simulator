@@ -23,9 +23,6 @@ def simul_data_args():
     # prog="python -m data_simulator",
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('out_dir', type=str,
-                        help="directory to write results, in absolute path")
-
     parser.add_argument("--m", type=int, help="total number of desired variables")
 
     parser.add_argument("--m_with_overlap", type=int, help="number of desired variables that are overlapping\
@@ -49,6 +46,9 @@ def simul_data_args():
                          -Note: this parameter does not affect simulation of the values for each a and b groups (allways uniform)-")
 
     parser.add_argument('--plot_data', action=argparse.BooleanOptionalAction, default=True)
+
+    parser.add_argument('out_dir', type=str,
+                        help="directory to write results, relative path")
 
     return parser
 
@@ -165,7 +165,7 @@ def distances_grouped_ranges_linear(grouped_ranges_dict):
     """
     odi = {'Pos': [], 'Neg': []}
 
-    d_over_s__pol = np.linspace(0, 1, num=len(grouped_ranges_dict['Pos']))
+    d_over_s__pol = np.linspace(0, 0.8, num=len(grouped_ranges_dict['Pos']))
     d_over_s__nel = np.linspace(-1, -0.1, num=len(grouped_ranges_dict['Neg']))
     d_positive_tmp = list()
 
@@ -361,7 +361,7 @@ if __name__ == "__main__":
     if not os.path.exists("figures/"):
         os.makedirs("figures/")
 
-    terv = f"{value_min_whole_df}-{value_max_whole_df}"
+    terv = f"{int(value_min_whole_df)}-{int(value_max_whole_df)}"
     name_file_out = f"simulated_data/data_{r}_m{m}-overlap{m_with_overlap}-a{card_a}-b{card_b}_{terv}.tsv"
     plotname = f"figures/{r}_m{m}-overlap{m_with_overlap}-a{card_a}-b{card_b}_{terv}.pdf"
 
@@ -395,9 +395,9 @@ if __name__ == "__main__":
     print("minimal value dataframe : ",  df['value'].min())
     print("maximal : ", df['value'].max())
 
-    if m > 60:
+    if m > 20:
         print("Won't print plot, too many variables: m= (m)")
-    if plot_data and m <= 60: # no more than 60 variables for this kind of plot
+    if plot_data and m <= 20: # no more than x variables for this kind of plot
         print("\nPrinting plot of simulated variables...")
         sns.set_style("darkgrid")
         sns.set_palette("Dark2")
@@ -410,15 +410,7 @@ if __name__ == "__main__":
     df_out = pd.pivot(pre_out, index='indiv', columns='var', values='value')
 
 
-    df_out.to_csv(name_file_out, sep='\t', index=True)
+    df_out.T.to_csv(name_file_out, sep='\t', index=True)
     print("\nDone")
-
-
-
-
-
-
-
-
 
 
