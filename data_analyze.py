@@ -11,6 +11,7 @@ import matplotlib.patches as mpatches
 import seaborn as sns
 import locale
 from scipy import stats
+import statsmodels.stats.multitest as ssm
 
 from data_simulator import plot_df_onerow, overlap_symmetric
 
@@ -65,21 +66,69 @@ def compute_abs_normalized_diff(b_values: np.array, a_values: np.array):
     return abs(result)
 
 
-def compute_ranksums_allH0(groupB: np.array, groupA: np.array):
-    # The Wilcoxon rank-sum test tests the null hypothesis that two sets of measurements are drawn from the same distribution
-    # ‘two-sided’: one of the distributions (underlying x or y) is stochastically greater than the other.
-    # ‘less’: the distribution underlying x is stochastically less than the distribution underlying y.
-    #  ‘greater’: the distribution underlying x is stochastically greater than the distribution underlying y.
-    groupA = groupA[~np.isnan(groupA)]
-    groupB = groupB[~np.isnan(groupB)]
-    if np.median(groupB) > np.median(groupA):
-        detected_alternative = 'greater'
-    elif np.median(groupB) < np.median(groupA):
-        detected_alternative = 'less'
-    else:
-        detected_alternative = 'two-sided'
-    stat, pval = stats.ranksums(groupB, groupA, alternative=detected_alternative)
-    return stat, pval
+# use ranksums as implemented in DIMet
+def compute_ranksums_allH0(vInterest: np.array, vBaseline: np.array):
+    """
+    The Wilcoxon rank-sum test tests the null hypothesis that two sets of
+     measurements are drawn from the same distribution.
+    ‘two-sided’: one of the distributions (underlying x or y) is
+        stochastically greater than the other.
+    ‘less’: the distribution underlying x is stochastically less
+        than the distribution underlying y.
+    ‘greater’: the distribution underlying x is stochastically
+        greater than the distribution underlying y.
+    """
+    vInterest = vInterest[~np.isnan(vInterest)]
+    vBaseline = vBaseline[~np.isnan(vBaseline)]
+    sta, p = stats.ranksums(vInterest, vBaseline, alternative="less")
+    sta2, p2 = stats.ranksums(vInterest, vBaseline,
+                                    alternative="greater")
+    sta3, p3 = stats.ranksums(vInterest, vBaseline,
+                                    alternative="two-sided")
+
+    # best (smaller pvalue) among all tailed tests
+    pretups = [(sta, p), (sta2, p2), (sta3, p3)]
+    tups = []
+    for t in pretups:  # make list of tuples with no-nan pvalues
+        if not np.isnan(t[1]):
+            tups.append(t)
+
+    if len(tups) == 0:  # if all pvalues are nan assign two sided result
+        tups = [(sta3, p3)]
+
+    stap_tup = min(tups, key=lambda x: x[1])  # nan already excluded
+    stat_result = stap_tup[0]
+    pval_result = stap_tup[1]
+
+    return stat_result, pval_result
+
+
+# use multiple test correction as implemented in DIMet
+def compute_padj(df: pd.DataFrame, correction_alpha: float,
+                 correction_method: str) -> pd.DataFrame:
+    '''
+    Performs multiple hypothesis testing correction on the p-values in the
+    DataFrame.
+    Deals with the situation where pvalue column can contain np.nan values
+    Adds a new column called "padj" with the adjusted p-values.
+    '''
+    tmp = df.copy()
+    # inspired from R documentation in p.adjust :
+    tmp["pvalue"] = tmp[["pvalue"]].fillna(1)
+
+    (sgs, corrP, _, _) = ssm.multipletests(tmp["pvalue"],
+                                           alpha=float(correction_alpha),
+                                           method=correction_method)
+    df = df.assign(padj=corrP)
+    truepadj = []
+    for v, w in zip(df["pvalue"], df["padj"]):
+        if np.isnan(v):
+            truepadj.append(v)
+        else:
+            truepadj.append(w)
+    df = df.assign(padj=truepadj)
+
+    return df
 
 
 def do_descriptor_df(df, groups):
@@ -112,7 +161,7 @@ def do_descriptor_df(df, groups):
                                "d_over_s": d_over_s,
                                "fold_change_b_a": fold_change_b_a,
                                "absolute_diff": absolute_diff,
-                               "pvalue_pkg": pvalue_pkg})
+                               "pvalue": pvalue_pkg})
 
     df_out_pkg.index = ["var_" + str(i) for i in range(1, (m + 1))]
     df_out_pkg['var'] = df_out_pkg.index
@@ -155,9 +204,12 @@ if __name__ == "__main__":
     tabl = args.in_file
         #"../simulated_data/data_dsta-l_m50-overlap45-a11-b12_67.0-1335.0.tsv"
     #tabl =  "../simulated_data/data_unif_m1000-overlap300-a33-b32_0-1.tsv"
-    dir_out = args.out_dir + tabl.split("/")[-1].replace(".tsv", "").replace("data_", "") + "/"
-    if not os.path.exists(dir_out):
-        os.makedirs(dir_out)
+    file_name_ok = tabl.split("/")[-1].replace(".tsv", "").replace("data_", "")
+    output_dir = args.out_dir
+    subfolder_out = os.path.join(args.out_dir,
+                                 file_name_ok)
+    if not os.path.exists(subfolder_out):
+        os.makedirs(subfolder_out)
 
     redo_plot_orig_data = args.redo_plot_orig_data
 
@@ -184,6 +236,7 @@ if __name__ == "__main__":
     groups = ['a', 'b']
     df_out_pkg, len_grA, len_grB = do_descriptor_df(df, groups)
 
+    df_out_pkg = compute_padj(df_out_pkg, 0.05, 'fdr_bh')
 
     if redo_plot_orig_data:
         if m > 20:
@@ -196,44 +249,43 @@ if __name__ == "__main__":
             sns.set_style("darkgrid")
             sns.set_palette("Dark2")
             df_pl = df_pl.sort_values("distance", ascending=True)
-            plot_df_onerow(df_pl, dir_out + "1.pdf")
+            plot_df_onerow(df_pl, os.path.join(subfolder_out, "1.pdf"))
 
+    print(subfolder_out)
 
     #sns.set_theme(style="white")
     sns.set_theme(style="ticks")
     sns.jointplot(data=df_out_pkg,
                   x='absolute_diff', y= 'd_over_s', color ="#4CB391")
-    plt.savefig(dir_out + "2.pdf")
+    plt.savefig(os.path.join(subfolder_out, "2.pdf"))
     #plt.show()
 
     sns.jointplot(data=df_out_pkg,
                   x='intervals_rel', y='d_over_s', color="#4CB391")
-    plt.savefig(dir_out + "3.pdf")
+    plt.savefig(os.path.join(subfolder_out, "3.pdf"))
 
     #plt.show()
 
     sns.jointplot(data=df_out_pkg,
                   x='absolute_diff', y='intervals_rel', color="#4CB391")
-    plt.savefig(dir_out + "4.pdf")
+    plt.savefig(os.path.join(subfolder_out, "4.pdf"))
     #plt.show()
 
-    print()
-
     ####################################
-    ### bubbles plot pvalue viridis
+    ### bubbles plot padj viridis
     ####################################
 
     sns.set_theme(style="darkgrid")
 
     plt.figure(figsize=(10, 8))
     plt.scatter(data=df_out_pkg, x='absolute_diff', y='d_over_s', alpha=0.75,
-                c='pvalue_pkg', s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25, cmap="viridis_r")
+                c='padj', s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25, cmap="viridis_r")
     #s = (intervals_rel ** 2) * 60,
     ax = plt.gca()
     min_bub = df_out_pkg['intervals_rel'].min()
     max_bub = df_out_pkg['intervals_rel'].max()
 
-    plt.colorbar(label="pval_non_parametric_test")
+    plt.colorbar(label="padj_non_parametric_test")
     plt.xlabel("absolute_diff")
     plt.ylabel("d_over_s")
 
@@ -249,7 +301,7 @@ if __name__ == "__main__":
     plt.title(f"Comparing group B (n={len_grB}) vs A (n={len_grA}) across {m} variables. ")
 
     #plt.show()
-    plt.savefig(dir_out + "5.pdf")
+    plt.savefig(os.path.join(subfolder_out, "5.pdf"))
     plt.close()
     ###
 
@@ -258,8 +310,8 @@ if __name__ == "__main__":
     ###########
 
     df_out_pkg['p_class'] = ''
-    df_out_pkg.loc[df_out_pkg['pvalue_pkg'] <= 0.05, 'p_class'] = '<= 0.05 (significant)'
-    df_out_pkg.loc[df_out_pkg['pvalue_pkg'] > 0.05, 'p_class'] = '> 0.05'
+    df_out_pkg.loc[df_out_pkg['padj'] <= 0.05, 'padj_class'] = '<= 0.05 (significant)'
+    df_out_pkg.loc[df_out_pkg['padj'] > 0.05, 'padj_class'] = '> 0.05'
 
     mypal_categ_pval = {'<= 0.05 (significant)': 'coral',
                         '> 0.05': 'dodgerblue'}
@@ -268,7 +320,7 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(10, 8))
     plt.scatter(data=df_out_pkg, x='absolute_diff', y='d_over_s', alpha=0.5,
-                c=df_out_pkg['p_class'].map(mypal_categ_pval),
+                c=df_out_pkg['padj_class'].map(mypal_categ_pval),
                 s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25)
 
     ax = plt.gca()
@@ -300,42 +352,16 @@ if __name__ == "__main__":
     #plt.show()
     plt.xlabel("absolute_diff")
     plt.ylabel("d_over_s")
-    plt.savefig(dir_out + "6.pdf")
+    plt.savefig(os.path.join(subfolder_out, "6.pdf"))
     plt.close()
 
-
-
-    def relplot_old():
-        df_out_pkg['p_class'] = ''
-        df_out_pkg.loc[df_out_pkg['pvalue_pkg'] <= 0.05, 'p_class'] = '<= 0.05 (significant)'
-        df_out_pkg.loc[df_out_pkg['pvalue_pkg'] > 0.05, 'p_class'] = '> 0.05'
-
-        mypal_categ_pval = {'<= 0.05 (significant)' : 'coral',
-                                '> 0.05' : 'dodgerblue' }
-
-        plt.figure(figsize=(13, 9))
-
-        relp = sns.relplot(x="absolute_diff", y="d_over_s", hue="p_class", size='intervals_rel',
-                    sizes=(25, 250),
-                    alpha=.5,  palette=mypal_categ_pval, #palette="muted",
-                    #height=6,
-                           data=df_out_pkg)
-        plt.title(f"Comparing group B (n={len_grB}) vs A (n={len_grA}) across {m} variables. ")
-        ax = relp.axes[0,0]
-        # add dots annotations:
-        stytext = dict(size=8, color='gray')
-        for i,r in df_out_pkg.iterrows():
-            ax.text(x=df_out_pkg.loc[i, 'absolute_diff'],
-                     y=df_out_pkg.loc[i, 'd_over_s'],
-                     s=df_out_pkg.loc[i, 'var'], **stytext)
-
-        # plt.show()
-        plt.savefig(dir_out + "6-old.pdf")
-
+    ## save table
+    df_out_pkg.to_csv(os.path.join(output_dir, f'result_{file_name_ok}.tsv'),
+                      sep=('\t'))
 
     ###
     print("cases where distance is negative but padj is signif : ")
-    whois_lodiff_lods_psignif  = df_out_pkg.loc[df_out_pkg['pvalue_pkg'] <= 0.05, :]
+    whois_lodiff_lods_psignif  = df_out_pkg.loc[df_out_pkg['padj'] <= 0.05, :]
     whois_lodiff_lods_psignif = whois_lodiff_lods_psignif.loc[
         whois_lodiff_lods_psignif['d_over_s'] <= -0.01, : ]
     print(whois_lodiff_lods_psignif)

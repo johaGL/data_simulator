@@ -297,7 +297,7 @@ def plot_df_two_row(df, name) -> None:
     plt.close()
 
 
-def plot_df_onerow(df, name) -> None:
+def plot_df_onerow(df, out_path) -> None:
     df["group"] = pd.Categorical(df["group"].tolist(), categories=["a", "b"] )
     sns.set_style("darkgrid")
     sns.set_palette("Dark2")
@@ -324,7 +324,7 @@ def plot_df_onerow(df, name) -> None:
     g.map_dataframe(annotate)
     g.set_xlabels("")
     g.add_legend()
-    plt.savefig(name)
+    plt.savefig(out_path)
     plt.close()
 
 
