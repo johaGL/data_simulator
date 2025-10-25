@@ -1,5 +1,6 @@
 """
-plot different metrics from simulateddata
+Run differential analysis on simulated data
+also, plots different metrics of this analysis
 """
 import os
 import argparse
@@ -20,10 +21,10 @@ def descri_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('in_file', type=str,
-                        help="data file to describe, absolute path")
+                        help="data file to analyze, relative path")
 
     parser.add_argument('out_dir', type=str,
-                        help="directory to write results, in absolute path")
+                        help="directory to write results, relative path")
 
     parser.add_argument('--redo_plot_orig_data', action=argparse.BooleanOptionalAction, default=False)
     return parser
@@ -102,6 +103,62 @@ def compute_ranksums_allH0(vInterest: np.array, vBaseline: np.array):
 
     return stat_result, pval_result
 
+def compute_mann_whitney_allH0(vInterest, vBaseline):
+    """
+    Calculate Mann–Whitney U test (a.k.a Wilcoxon rank-sum test,
+    or Wilcoxon–Mann–Whitney test, or Mann–Whitney–Wilcoxon (MWW/MWU), )
+    DO NOT : use_continuity False AND method "auto" at the same time.
+    because "auto" will set continuity depending on ties and sample size.
+    If ties in the data  and method "exact" (i.e use_continuity False)
+    pvalues cannot be calculated, check scipy doc
+    """
+    usta, p = stats.mannwhitneyu(
+        vInterest,
+        vBaseline,
+        # method = "auto",
+        use_continuity=False,
+        alternative="less",
+    )
+
+    usta2, p2 = stats.mannwhitneyu(
+        vInterest,
+        vBaseline,
+        # method = "auto",
+        use_continuity=False,
+        alternative="greater",
+    )
+
+    usta3, p3 = stats.mannwhitneyu(
+        vInterest,
+        vBaseline,
+        # method = "auto",
+        use_continuity=False,
+        alternative="two-sided",
+    )
+
+    # best (smaller pvalue) among all tailed tests
+    pretups = [(usta, p), (usta2, p2), (usta3, p3)]
+    tups = []
+    for t in pretups:  # make list of tuples with no-nan pvalues
+        if not np.isnan(t[1]):
+            tups.append(t)
+
+    if len(tups) == 0:  # if all pvalues are nan assign two sided result
+        tups = [(usta3, p3)]
+
+    stap_tup = min(tups, key=lambda x: x[1])  # nan already excluded
+    stat_result = stap_tup[0]
+    pval_result = stap_tup[1]
+
+    return stat_result, pval_result
+
+
+def absolute_geommean_diff(b_values: np.array, a_values: np.array):
+    m_b = compute_gmean_nonan(b_values)
+    m_a = compute_gmean_nonan(a_values)
+    diff_absolute = abs(m_b - m_a)
+    return diff_absolute
+
 
 # use multiple test correction as implemented in DIMet
 def compute_padj(df: pd.DataFrame, correction_alpha: float,
@@ -147,13 +204,15 @@ def do_descriptor_df(df, groups):
         len_grA = len(groupA)
         len_grB = len(groupB)
         # comparison is B/ A
-        distance_here = overlap_symmetric(groupA, groupB)
+        distance_here = overlap_symmetric(groupB, groupA)
         distance.append(distance_here)
         intervals_rel.append(compute_intervals_relation(groupB, groupA))
         d_over_s.append(compute_distance_over_span(distance_here, groups_both_vals))
         fold_change_b_a.append(compute_b_versus_a_fold_change(groupB, groupA))
         absolute_diff.append(compute_abs_normalized_diff(groupB, groupA))
-        stat, pval = compute_ranksums_allH0(groupB, groupA)
+        #stat, pval = compute_ranksums_allH0(groupB, groupA)
+        stat, pval = compute_mann_whitney_allH0(groupB, groupA)
+
         pvalue_pkg.append(pval)
 
     df_out_pkg = pd.DataFrame({"intervals_rel": intervals_rel,
@@ -197,6 +256,7 @@ def compute_reduction(df, ddof):
         res.loc[protein] = reduced_abundances
     return res
 
+
 if __name__ == "__main__":
 
     parser = descri_args()
@@ -235,6 +295,10 @@ if __name__ == "__main__":
     # by var and by group, obtain descriptive metrics:
     groups = ['a', 'b']
     df_out_pkg, len_grA, len_grB = do_descriptor_df(df, groups)
+
+    show_plot_signif = 'padj'
+    # if (len_grA <= 3) or (len_grA <= 3):
+        # show_plot_signif = 'pvalue'
 
     df_out_pkg = compute_padj(df_out_pkg, 0.05, 'fdr_bh')
 
@@ -279,7 +343,9 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(10, 8))
     plt.scatter(data=df_out_pkg, x='absolute_diff', y='d_over_s', alpha=0.75,
-                c='padj', s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25, cmap="viridis_r")
+                c=show_plot_signif,
+                s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25,
+                cmap="viridis_r")
     #s = (intervals_rel ** 2) * 60,
     ax = plt.gca()
     min_bub = df_out_pkg['intervals_rel'].min()
@@ -309,9 +375,10 @@ if __name__ == "__main__":
     ### same plot but classify into significant and not significant
     ###########
 
-    df_out_pkg['p_class'] = ''
-    df_out_pkg.loc[df_out_pkg['padj'] <= 0.05, 'padj_class'] = '<= 0.05 (significant)'
-    df_out_pkg.loc[df_out_pkg['padj'] > 0.05, 'padj_class'] = '> 0.05'
+    df_out_pkg.loc[
+        df_out_pkg[show_plot_signif] <= 0.05, 'class'] = '<= 0.05 (significant)'
+    df_out_pkg.loc[
+        df_out_pkg[show_plot_signif] > 0.05, 'class'] = '> 0.05'
 
     mypal_categ_pval = {'<= 0.05 (significant)': 'coral',
                         '> 0.05': 'dodgerblue'}
@@ -320,7 +387,7 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(10, 8))
     plt.scatter(data=df_out_pkg, x='absolute_diff', y='d_over_s', alpha=0.5,
-                c=df_out_pkg['padj_class'].map(mypal_categ_pval),
+                c=df_out_pkg['class'].map(mypal_categ_pval),
                 s=(df_out_pkg['intervals_rel'].to_numpy()*100) ** 1.25)
 
     ax = plt.gca()
@@ -360,8 +427,9 @@ if __name__ == "__main__":
                       sep=('\t'))
 
     ###
-    print("cases where distance is negative but padj is signif : ")
-    whois_lodiff_lods_psignif  = df_out_pkg.loc[df_out_pkg['padj'] <= 0.05, :]
+    print("cases where distance is negative but still signif : ")
+    whois_lodiff_lods_psignif  = df_out_pkg.loc[df_out_pkg[
+                                                    show_plot_signif] <= 0.05, :]
     whois_lodiff_lods_psignif = whois_lodiff_lods_psignif.loc[
         whois_lodiff_lods_psignif['d_over_s'] <= -0.01, : ]
     print(whois_lodiff_lods_psignif)

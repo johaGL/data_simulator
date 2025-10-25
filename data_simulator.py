@@ -190,11 +190,30 @@ def distances_grouped_ranges_linear(grouped_ranges_dict):
 
     return odi
 
+def bring_ranges_to_narrower(range_a, range_b):
+    """detect which is the narrower range, to put the evenly spaced values within
+    valid if n of subjects (samples) is 4 or less (too small sample size)
+    Note:
+        when very small sample size, the imbalanced intervals yield false negatives in statistical testing
+        this is why when 4 or fewer samples, must simulate balanced intervals
+    """
+
+    if abs(range_a[1] - range_a[0]) > abs(range_b[1] - range_b[0]):
+        compensate_diff = abs(range_b[1] - range_b[0])
+        range_a = [range_a[0], range_a[0] + compensate_diff]
+
+    if abs(range_a[1] - range_a[0]) < abs(range_b[1] - range_b[0]):
+        compensate_diff = abs(range_a[1] - range_a[0])
+        range_b = [range_b[1] - compensate_diff, range_b[1]]
+
+    return range_a, range_b
+
 
 def compute_a_b_groups(inf_lim, sup_lim, card_a, card_b, mydistance) :
     """produce a and b groups, given one single distance """
     distance = mydistance
     span = sup_lim - inf_lim
+
     # solving for positive and negative distances
     if distance < 0 :
         h = sup_lim - (span - (distance * -1))
@@ -204,17 +223,26 @@ def compute_a_b_groups(inf_lim, sup_lim, card_a, card_b, mydistance) :
         b_min = np.random.uniform((inf_lim + distance), sup_lim, size=1)[0]  # a number between min + distance, and max
         a_max = b_min - distance
 
-    if card_a > 2 :
+    narrow_a, narrow_b = bring_ranges_to_narrower(range_a=[inf_lim, a_max],
+                                                  range_b = [b_min, sup_lim])
+
+    if card_a > 4 :
         a_values = np.random.uniform(inf_lim, a_max, size=card_a-2) # the two extremes to be added next line
         a_interval = np.append(a_values, np.array([inf_lim, a_max]) , axis=None)
     else:
-        a_interval = np.array([inf_lim, a_max])
+        if distance > 0:
+            a_interval = np.linspace(narrow_a[0], narrow_a[1], card_a)
+        else:
+            a_interval =  np.linspace(inf_lim, a_max, card_a)
 
-    if card_b > 2:
+    if card_b > 4:
         b_values = np.random.uniform(b_min, sup_lim, size= card_b-2) # the two extremes to be added next line
         b_interval = np.append(b_values, np.array([b_min, sup_lim]), axis=None)
     else:
-        b_interval = np.array([b_min, sup_lim])
+        if distance > 0:
+            b_interval = np.linspace(narrow_b[0], narrow_b[1], card_b)
+        else:
+            b_interval = np.linspace(b_min, sup_lim, card_b)
 
     return a_interval, b_interval
 
